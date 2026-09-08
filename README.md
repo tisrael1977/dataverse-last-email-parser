@@ -76,6 +76,7 @@ List<EmbeddedAttachment> ExtractLatestMessageAttachments(string html);
 dataverse-last-email-parser/
 ├── README.md
 ├── LICENSE
+├── .vscode/                      # F5 debug config for the test tool (launch.json + tasks.json)
 ├── docs/
 │   ├── CUSTOM_ACTION.md          # What the Custom API does + the downstream OCR flow
 │   └── INSTALLATION.md           # Install guide (solution import OR manual build/register)
@@ -87,6 +88,10 @@ dataverse-last-email-parser/
 │   │   ├── DataverseLastEmailParser_managed.zip
 │   │   └── DataverseLastEmailParser_unmanaged.zip
 │   └── deploy/deploy.ps1         # Idempotent Web API deployer (advanced/dev use)
+├── tools/
+│   └── InvokeLatestEmail/        # Console .exe: sign in + call the Custom API live (net9.0)
+│       ├── Program.cs            # MSAL interactive sign-in → Execute → prints 4 outputs
+│       └── README.md             # How to run / build the test tool
 └── src/
     ├── D365EmailParser/          # Parser library + console tests (net10.0)
     │   ├── EmailThreadParser.cs   # ← the reusable parser (shared with the plugin)
@@ -204,6 +209,22 @@ Content-Type: application/json
 
 See **[docs/CUSTOM_ACTION.md](docs/CUSTOM_ACTION.md)** for the full description and the
 downstream OCR / Document Intelligence flow.
+
+---
+
+## Test it live (console .exe)
+
+A ready-made console tool in **`tools/InvokeLatestEmail`** signs you in with a browser and
+calls the Custom API for one email id, printing all four outputs — handy for testing from
+VS Code without Postman.
+
+```bash
+cd tools/InvokeLatestEmail
+dotnet run -- https://YOURORG.crm.dynamics.com <email-guid>
+```
+
+Or press **F5** in VS Code (a debug config ships in `.vscode/launch.json`) to step through it
+under the debugger. See **[tools/InvokeLatestEmail/README.md](tools/InvokeLatestEmail/README.md)**.
 
 ---
 
