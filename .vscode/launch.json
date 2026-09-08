@@ -1,0 +1,22 @@
+{
+  // VS Code debug configuration for InvokeLatestEmail.
+  // Press F5 with the repo open to launch under the debugger.
+  // Edit "args" below to change the email id or org url.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug InvokeLatestEmail",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-invokelatestemail",
+      "program": "${workspaceFolder}/tools/InvokeLatestEmail/bin/Debug/net9.0/InvokeLatestEmail.dll",
+      "args": [
+        "https://tomer-israel-zini.crm4.dynamics.com",
+        "5297e3ea-9aaa-f111-aaab-7ced8d95b8f6"
+      ],
+      "cwd": "${workspaceFolder}/tools/InvokeLatestEmail",
+      "console": "integratedTerminal",
+      "stopAtEntry": false
+    }
+  ]
+}
