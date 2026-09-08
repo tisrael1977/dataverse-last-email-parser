@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# Merged / release artifacts
+merged/
+*.dll
+*.pdb
+
+# Strong-name key — NEVER commit. Generate your own with: sn -k plugin.snk
+*.snk
+
+# Personal / private email fixtures (never commit real email bodies)
+sample1.txt
+sample2.txt
+**/private-samples/
+
+# IDE / user files
+.vs/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+packages/

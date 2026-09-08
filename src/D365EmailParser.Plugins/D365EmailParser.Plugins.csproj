@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Dataverse plugin assemblies target .NET Framework 4.6.2 -->
+    <TargetFramework>net462</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>D365EmailParser.Plugins</AssemblyName>
+    <RootNamespace>D365EmailParser.Plugins</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- Strong-naming is only enabled when you supply your own key (plugin.snk is git-ignored).
+       Generate one with:  sn -k plugin.snk   (see docs/CUSTOM_ACTION.md). -->
+  <PropertyGroup Condition="Exists('plugin.snk')">
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>plugin.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Dataverse SDK for plugins -->
+    <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.51" />
+    <!-- HTML parser. Must be ILMerged/ILRepack'd into this assembly for sandbox (isolation) mode. -->
+    <PackageReference Include="HtmlAgilityPack" Version="1.11.62" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reuse the exact same verified parser source from the console project -->
+    <Compile Include="..\D365EmailParser\EmailThreadParser.cs" Link="EmailThreadParser.cs" />
+  </ItemGroup>
+
+</Project>
