@@ -30,7 +30,10 @@ namespace D365EmailParser.Plugins
     ///     LatestText                  (String)  latest message, plain text.
     ///     LatestTextWithPlaceholders  (String)  latest text with attachment tokens inline.
     ///     LatestHtml                  (String)  latest message HTML (history trimmed).
-    ///     AttachmentIds               (String)  JSON array of the latest-message GUIDs, in order.
+    ///     AttachmentIds               (String)  JSON array of the latest-message embedded (cid:) GUIDs, in order.
+    ///     RegularAttachmentIds        (String)  JSON array of the email's real file attachments
+    ///                                           (NOT cid:-embedded in the body — e.g. PDF, transfer image;
+    ///                                           inline signature logos are excluded).
     ///
     /// Invoke it exactly like an unbound action, e.g.:
     ///   POST [org]/api/data/v9.2/dlep_GetLatestEmailWithPlaceholders
@@ -77,11 +80,19 @@ namespace D365EmailParser.Plugins
 
                 tracing.Trace("Latest message extracted; {0} embedded attachment(s).", atts.Count);
 
+                // ---- regular (non cid:-embedded) file attachments on the email ----
+                // Signature logos / inline screenshots are referenced by cid: (or data-attachment-id)
+                // in the body; real file attachments (PDF, the transfer image) are NOT — they exist
+                // only as activitymimeattachment records. Classify by whether each attachment is
+                // actually referenced in the body HTML.
+                string regularAttachmentIds = BuildRegularAttachmentsJson(service, tracing, emailId, html);
+
                 // ---- outputs ----
                 context.OutputParameters["LatestText"] = latestText;
                 context.OutputParameters["LatestTextWithPlaceholders"] = placed;
                 context.OutputParameters["LatestHtml"] = latestHtml;
                 context.OutputParameters["AttachmentIds"] = ToJsonArray(atts);
+                context.OutputParameters["RegularAttachmentIds"] = regularAttachmentIds;
             }
             catch (InvalidPluginExecutionException)
             {
@@ -113,6 +124,85 @@ namespace D365EmailParser.Plugins
 
         private static string GetInput(IPluginExecutionContext context, string name)
             => context.InputParameters.TryGetValue(name, out var v) ? v as string : null;
+
+        /// <summary>
+        /// Builds the RegularAttachmentIds JSON: every activitymimeattachment on the email that is
+        /// NOT cid:-embedded in the body (i.e. a real file attachment — PDF, the transfer image),
+        /// excluding inline images (signature logos) that ARE referenced in the HTML via
+        /// src="cid:..." or data-attachment-id.
+        /// Shape: [{"attachmentId":"..","fileName":"..","mimeType":"..","fileSize":n,"contentId":".."}].
+        /// </summary>
+        private static string BuildRegularAttachmentsJson(
+            IOrganizationService service, ITracingService tracing, Guid emailId, string fullHtml)
+        {
+            // 1) Which Content-Ids / attachment GUIDs are actually referenced in the body HTML?
+            var referencedCids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var referencedAttIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in EmailThreadParser.ExtractAllEmbeddedAttachments(fullHtml))
+            {
+                if (!string.IsNullOrEmpty(e.ContentId)) referencedCids.Add(NormalizeCid(e.ContentId));
+                if (!string.IsNullOrEmpty(e.AttachmentId)) referencedAttIds.Add(e.AttachmentId.Trim());
+            }
+
+            // 2) All attachment records linked to this email.
+            var query = new QueryExpression("activitymimeattachment")
+            {
+                ColumnSet = new ColumnSet(
+                    "activitymimeattachmentid", "filename", "mimetype", "filesize", "attachmentcontentid"),
+                Criteria = new FilterExpression()
+            };
+            query.Criteria.AddCondition("objectid", ConditionOperator.Equal, emailId);
+            var attachments = service.RetrieveMultiple(query);
+
+            // 3) Keep only those NOT referenced (by cid or attachment-id) in the body.
+            var regular = new List<Entity>();
+            foreach (var a in attachments.Entities)
+            {
+                var cid = a.GetAttributeValue<string>("attachmentcontentid");
+                bool embeddedInBody =
+                    (!string.IsNullOrEmpty(cid) && referencedCids.Contains(NormalizeCid(cid)))
+                    || referencedAttIds.Contains(a.Id.ToString());
+                if (!embeddedInBody)
+                    regular.Add(a);
+            }
+
+            tracing.Trace("Attachments: {0} total, {1} regular (non cid:-embedded).",
+                attachments.Entities.Count, regular.Count);
+
+            return RegularAttachmentsToJson(regular);
+        }
+
+        /// <summary>Normalises a Content-Id for comparison: trims and strips wrapping angle brackets.</summary>
+        private static string NormalizeCid(string cid)
+        {
+            if (string.IsNullOrEmpty(cid)) return cid;
+            cid = cid.Trim();
+            if (cid.StartsWith("<") && cid.EndsWith(">") && cid.Length >= 2)
+                cid = cid.Substring(1, cid.Length - 2).Trim();
+            return cid;
+        }
+
+        private static string RegularAttachmentsToJson(IEnumerable<Entity> items)
+        {
+            var sb = new StringBuilder();
+            sb.Append('[');
+            bool first = true;
+            foreach (var a in items)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                var size = a.GetAttributeValue<int?>("filesize");
+                sb.Append('{');
+                sb.Append("\"attachmentId\":").Append(JsonString(a.Id.ToString())).Append(',');
+                sb.Append("\"fileName\":").Append(JsonString(a.GetAttributeValue<string>("filename"))).Append(',');
+                sb.Append("\"mimeType\":").Append(JsonString(a.GetAttributeValue<string>("mimetype"))).Append(',');
+                sb.Append("\"fileSize\":").Append(size?.ToString(CultureInfo.InvariantCulture) ?? "null").Append(',');
+                sb.Append("\"contentId\":").Append(JsonString(a.GetAttributeValue<string>("attachmentcontentid")));
+                sb.Append('}');
+            }
+            sb.Append(']');
+            return sb.ToString();
+        }
 
         /// <summary>Ordered JSON array: [{"attachmentId":"..","contentId":"..","alt":"..","width":n,"height":n}].</summary>
         private static string ToJsonArray(IEnumerable<EmbeddedAttachment> items)

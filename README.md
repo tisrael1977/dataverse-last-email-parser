@@ -196,7 +196,8 @@ Full details and the manual (build-and-register) alternative are in
 | `LatestText` | String | Latest message, plain text. |
 | `LatestTextWithPlaceholders` | String | Latest text with attachment tokens inline. |
 | `LatestHtml` | String | Latest message HTML (history trimmed). |
-| `AttachmentIds` | String | JSON array of the latest-message attachment GUIDs, in order. |
+| `AttachmentIds` | String | JSON array of the latest message's **inline / `cid:`-embedded** attachments (signature logos, screenshots), in order. |
+| `RegularAttachmentIds` | String | JSON array of the email's **real file attachments** — those **not** `cid:`-embedded in the body (PDF, transfer image). Signature logos are excluded. |
 
 Invoke it like any unbound action:
 

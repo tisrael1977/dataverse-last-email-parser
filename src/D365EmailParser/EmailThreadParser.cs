@@ -96,10 +96,23 @@ public static class EmailThreadParser
     /// records from Dataverse.
     /// </summary>
     public static List<EmbeddedAttachment> ExtractLatestMessageAttachments(string html)
+        => ScanEmbeddedAttachments(ExtractLatestMessageHtml(html));
+
+    /// <summary>
+    /// Returns EVERY inline/embedded attachment reference found in the WHOLE body (latest message
+    /// AND quoted history), without trimming. Use this to build the set of Content-Ids / attachment
+    /// GUIDs that are actually <c>cid:</c>-embedded in the HTML, so you can tell an inline image
+    /// (signature logo, embedded screenshot) apart from a real file attachment that is only linked
+    /// to the email as an <c>activitymimeattachment</c> record and never referenced in the body.
+    /// </summary>
+    public static List<EmbeddedAttachment> ExtractAllEmbeddedAttachments(string html)
+        => ScanEmbeddedAttachments(html);
+
+    /// <summary>Scans a body fragment for elements carrying data-attachment-id or a cid: src.</summary>
+    private static List<EmbeddedAttachment> ScanEmbeddedAttachments(string html)
     {
-        var latestHtml = ExtractLatestMessageHtml(html);
         var doc = new HtmlDocument();
-        doc.LoadHtml(latestHtml);
+        doc.LoadHtml(html ?? string.Empty);
 
         var result = new List<EmbeddedAttachment>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

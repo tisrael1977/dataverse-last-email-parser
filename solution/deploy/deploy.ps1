@@ -124,5 +124,6 @@ Ensure-RespProp "LatestText"                 "Latest Text"                   10
 Ensure-RespProp "LatestTextWithPlaceholders" "Latest Text With Placeholders" 10
 Ensure-RespProp "LatestHtml"                 "Latest Html"                   10
 Ensure-RespProp "AttachmentIds"              "Attachment Ids (JSON)"         10
+Ensure-RespProp "RegularAttachmentIds"       "Regular Attachment Ids (JSON)" 10
 
 Write-Host "DONE. Custom API '$CustomApiName' deployed to solution '$SolutionUniqueName'." -ForegroundColor Green

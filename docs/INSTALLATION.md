@@ -55,7 +55,7 @@ The solution **Dataverse Last Email Parser** now contains:
 - Plugin type `D365EmailParser.Plugins.GetLatestEmailWithPlaceholders`
 - Custom API `dlep_GetLatestEmailWithPlaceholders` with request params `EmailId`,
   `PlaceholderFormat` and response props `LatestText`, `LatestTextWithPlaceholders`,
-  `LatestHtml`, `AttachmentIds`.
+  `LatestHtml`, `AttachmentIds`, `RegularAttachmentIds`.
 
 Test it (any REST client authenticated to the org):
 
@@ -66,8 +66,8 @@ Content-Type: application/json
 { "EmailId": "<an-email-guid>" }
 ```
 
-You should get back `LatestText`, `LatestTextWithPlaceholders`, `LatestHtml`, and
-`AttachmentIds`.
+You should get back `LatestText`, `LatestTextWithPlaceholders`, `LatestHtml`, `AttachmentIds`,
+and `RegularAttachmentIds`.
 
 ### Uninstall
 
@@ -123,7 +123,7 @@ $tok = az account get-access-token --resource $org --query accessToken -o tsv
 ```
 
 The script creates (or reuses) the publisher + solution, then registers the assembly, plugin
-type, Custom API, its 2 request parameters and 4 response properties.
+type, Custom API, its 2 request parameters and 5 response properties.
 
 **Or with the Plugin Registration Tool (PRT) + maker portal:**
 
@@ -137,7 +137,7 @@ type, Custom API, its 2 request parameters and 4 response properties.
    - **Plugin Type:** `D365EmailParser.Plugins.GetLatestEmailWithPlaceholders`
    - **Request Parameters:** `EmailId` (String, Required), `PlaceholderFormat` (String, Optional)
    - **Response Properties:** `LatestText`, `LatestTextWithPlaceholders`, `LatestHtml`,
-     `AttachmentIds` (all String)
+     `AttachmentIds`, `RegularAttachmentIds` (all String)
 
    > Parameter/response **Unique Names are case-sensitive** and must match exactly.
 4. **Publish all customizations.**

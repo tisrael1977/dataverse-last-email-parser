@@ -2,7 +2,8 @@
 
 A Dynamics 365 / Dataverse **Custom API** (an unbound message backed by an `IPlugin`) that,
 given an **email id**, returns **only the latest message** of a concatenated email thread —
-plus the **embedded attachment GUIDs that belong to that latest message only**.
+plus the **embedded attachment GUIDs that belong to that latest message only**, and separately the
+**real file attachments** (`RegularAttachmentIds`) that are *not* `cid:`-embedded in the body.
 
 - Assembly: `D365EmailParser.Plugins.dll` (HtmlAgilityPack merged in, strong-named)
 - Plugin type: `D365EmailParser.Plugins.GetLatestEmailWithPlaceholders`
@@ -72,7 +73,8 @@ Fully reconstructed, reading-order-correct plain text of the newest message.
 | `LatestText` | String | The newest message as plain text (history removed). |
 | `LatestTextWithPlaceholders` | String | Same text, with each embedded attachment replaced inline by the placeholder token. |
 | `LatestHtml` | String | The newest message as HTML (history removed). |
-| `AttachmentIds` | String | JSON array of the latest-message embedded attachments, in document order. |
+| `AttachmentIds` | String | JSON array of the latest-message **inline / `cid:`-embedded** attachments (signature logos, inline screenshots), in document order. |
+| `RegularAttachmentIds` | String | JSON array of the email's **real file attachments** — those **NOT** `cid:`-embedded in the body (e.g. a PDF or the transfer-details image). Inline signature/logo images are excluded. |
 
 `AttachmentIds` JSON shape:
 
@@ -88,6 +90,37 @@ Fully reconstructed, reading-order-correct plain text of the newest message.
 
 `attachmentId` is the **`activitymimeattachmentid`** — use it to retrieve the file from the
 `activitymimeattachment` table (`body` = Base64, plus `filename`, `mimetype`, `contentid`).
+
+`RegularAttachmentIds` JSON shape:
+
+```json
+[
+  { "attachmentId": "d11ebb12-6aa4-4719-98e5-6fa68e67995e",
+    "fileName": "beneficiary-details.pdf",
+    "mimeType": "application/pdf",
+    "fileSize": 34786,
+    "contentId": null }
+]
+```
+
+### `AttachmentIds` vs `RegularAttachmentIds`
+
+Both come from the same `activitymimeattachment` records, split by **whether the attachment is
+actually referenced in the body HTML**:
+
+| | `AttachmentIds` | `RegularAttachmentIds` |
+| --- | --- | --- |
+| **Contains** | Inline images embedded in the body via `src="cid:…"` or `data-attachment-id` (signature logos, pasted screenshots). | Real file attachments that are **not** referenced anywhere in the body HTML (PDF, the beneficiary/transfer image). |
+| **Scope** | The **latest message only** (quoted-history inline images are excluded). | The **whole email** (file attachments aren't tied to one message in the thread). |
+| **Typical use** | OCR + reassemble inline reading order (see placeholders). | Feed each file to Document Intelligence for the money-transfer / beneficiary details, without wasting OCR on signature logos. |
+
+> **Why this split matters for money-transfer extraction.** Signature logos are almost always
+> `cid:`-embedded, so they land in `AttachmentIds` and stay out of `RegularAttachmentIds`. The
+> beneficiary-bank-details file (PDF / image) is a normal attachment — not `cid:`-referenced — so it
+> lands in `RegularAttachmentIds`. Route only `RegularAttachmentIds` to your extraction agent and you
+> skip the signature noise automatically. The test is the actual `cid:` reference in the body, **not**
+> merely whether the attachment has a Content-Id — so a file that happens to carry a Content-Id but is
+> never inlined is still correctly treated as a regular attachment.
 
 ---
 
@@ -112,7 +145,8 @@ Response (shape):
   "LatestText": "Hi, Please process a transfer …",
   "LatestTextWithPlaceholders": "Hi, Please process a transfer of 2500 to the account shown here [[ATTACHMENT:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa]]",
   "LatestHtml": "<div dir=\"ltr\"> … </div>",
-  "AttachmentIds": "[{\"attachmentId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"contentId\":\"ii_latestimage\",\"alt\":\"image.png\",\"width\":313,\"height\":89}]"
+  "AttachmentIds": "[{\"attachmentId\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\",\"contentId\":\"ii_latestimage\",\"alt\":\"image.png\",\"width\":313,\"height\":89}]",
+  "RegularAttachmentIds": "[{\"attachmentId\":\"d11ebb12-6aa4-4719-98e5-6fa68e67995e\",\"fileName\":\"beneficiary-details.pdf\",\"mimeType\":\"application/pdf\",\"fileSize\":34786,\"contentId\":null}]"
 }
 ```
 
@@ -146,7 +180,7 @@ location in `LatestTextWithPlaceholders`.
   `CustomApiName` constant in `GetLatestEmailWithPlaceholders.cs`. The constant is documentation
   only — runtime behaviour is driven by the registered Custom API, so parameter **UniqueNames**
   (`EmailId`, `PlaceholderFormat`) and response **UniqueNames** (`LatestText`,
-  `LatestTextWithPlaceholders`, `LatestHtml`, `AttachmentIds`) must match the plugin's
+  `LatestTextWithPlaceholders`, `LatestHtml`, `AttachmentIds`, `RegularAttachmentIds`) must match the plugin's
   `InputParameters` / `OutputParameters` keys (they do out of the box).
 - **Placeholder token:** change per call via `PlaceholderFormat`, or change the default in the
   parser (`ExtractLatestMessageTextWithPlaceholders`).
@@ -160,12 +194,14 @@ location in `LatestTextWithPlaceholders`.
 
 ## 6. Verified behaviour (real emails)
 
-Tested against two real Dataverse emails (Hebrew Outlook thread + Gmail thread):
+Tested against real Dataverse emails (Hebrew Outlook thread + Gmail thread + mixed file/inline):
 
 | Email | Result |
 | --- | --- |
-| Outlook reply chain | Returned only the newest message; `AttachmentIds` = the **2** signature images of the latest message; the quoted history's images were excluded. |
-| Gmail reply chain (`gmail_quote`) | Returned only the newest message + its **1** inline image; the quoted `blockquote` reply (with its own signature images) was excluded. |
+| Outlook reply chain | Returned only the newest message; `AttachmentIds` = the **2** signature images of the latest message; the quoted history's images were excluded; `RegularAttachmentIds` = **`[]`** (all images are `cid:`-embedded). |
+| Gmail reply chain (`gmail_quote`) | Returned only the newest message + its **1** inline image; the quoted `blockquote` reply (with its own signature images) was excluded; `RegularAttachmentIds` = **`[]`**. |
+| Mixed (file attachment + inline signatures) | `AttachmentIds` = the **3** `cid:`-embedded signature/inline images; `RegularAttachmentIds` = the **1** real file attachment (`חיתום משכנתא.png`, empty Content-Id, not referenced in the body). |
+| File-only | `AttachmentIds` = `[]`; `RegularAttachmentIds` = the **1** attached file. |
 
 ---
 
