@@ -107,6 +107,7 @@ try
     Section("LatestTextWithPlaceholders", Get("LatestTextWithPlaceholders"));
     Section("LatestHtml", Get("LatestHtml"));
     Section("AttachmentIds (JSON)", Get("AttachmentIds"));
+    Section("RegularAttachmentIds (JSON)", Get("RegularAttachmentIds"));
 
     return 0;
 }
