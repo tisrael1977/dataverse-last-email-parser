@@ -67,6 +67,7 @@ public static class EmailThreadParser
         doc.LoadHtml(html);
 
         var root = doc.DocumentNode.SelectSingleNode("//body") ?? doc.DocumentNode;
+        RemoveNonMessageContent(root);
 
         var boundary = FindStructuralBoundary(root) ?? FindTextBoundary(root);
         if (boundary != null)
@@ -207,6 +208,39 @@ public static class EmailThreadParser
     private static int? ParseInt(string? s)
         => int.TryParse(s, out var v) ? v : (int?)null;
 
+    private static void RemoveNonMessageContent(HtmlNode root)
+    {
+        foreach (var node in root.Descendants().OrderByDescending(n => n.StreamPosition).ToList())
+        {
+            if (node.ParentNode == null)
+                continue;
+
+            var style = node.GetAttributeValue("style", "");
+            var isHiddenByStyle =
+                HasCssPropertyValue(style, "display", "none") ||
+                HasCssPropertyValue(style, "visibility", "hidden") ||
+                HasCssPropertyValue(style, "mso-hide", "all");
+
+            if (node.Name.Equals("script", StringComparison.OrdinalIgnoreCase) ||
+                node.Name.Equals("style", StringComparison.OrdinalIgnoreCase) ||
+                node.Name.Equals("noscript", StringComparison.OrdinalIgnoreCase) ||
+                node.Name.Equals("template", StringComparison.OrdinalIgnoreCase) ||
+                node.Attributes["hidden"] != null ||
+                node.GetAttributeValue("aria-hidden", "").Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                node.GetAttributeValue("id", "").StartsWith("pfptBanner", StringComparison.OrdinalIgnoreCase) ||
+                isHiddenByStyle)
+            {
+                node.Remove();
+            }
+        }
+    }
+
+    private static bool HasCssPropertyValue(string style, string property, string value)
+        => Regex.IsMatch(
+            style,
+            $@"(?:^|;)\s*{Regex.Escape(property)}\s*:\s*{Regex.Escape(value)}\s*" +
+            @"(?:!important\s*)?(?:;|$)",
+            RegexOptions.IgnoreCase);
 
     private static HtmlNode? FindStructuralBoundary(HtmlNode root)
     {
