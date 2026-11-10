@@ -261,10 +261,11 @@ forward, plain-text boundaries, single messages, hidden Proofpoint content, curr
 historical inline attachments, placeholder placement, complete-body attachment
 discovery, and preservation of visible styled content.
 
-Expected summary:
+Expected summary (this repository also runs the thread-boundary corpus from
+`EmailTestCorpus*.cs`, see [PARSER_FIX_SEPARATOR_LINES.md](PARSER_FIX_SEPARATOR_LINES.md)):
 
 ```text
-==== 11 passed, 0 failed ====
+==== 105 passed, 0 failed, 5 known gaps ====
 ```
 
 Regular file attachments such as PDFs are not represented by elements in the HTML and

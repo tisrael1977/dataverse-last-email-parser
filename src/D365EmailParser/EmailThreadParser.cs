@@ -40,22 +40,52 @@ public sealed class EmbeddedAttachment
 ///   * D365 web email editor (CKEditor) reply -> &lt;hr&gt; divider followed by a
 ///     &lt;b&gt;From:&lt;/b&gt; ... header paragraph.
 ///   * Gmail -> &lt;div class="gmail_quote"&gt; / &lt;blockquote class="gmail_quote"&gt;.
-///   * Generic -> &lt;blockquote&gt;, "-----Original Message-----", long underscore rules.
+///   * Generic -> quoted &lt;blockquote&gt; (type="cite" / "... wrote:" attribution),
+///     "-----Original Message-----", and _____ / ----- rules followed by a From:/Sent: header.
+///     Rules and indent-only blockquotes inside ONE message are NOT treated as history.
 /// </summary>
 public static class EmailThreadParser
 {
-    // Header block that opens a quoted message. Multi-language (EN/ES/DE/NL/IT/FR/PT/RU).
+    // Whitespace plus the bidi marks (LRM/RLM/embeddings) that RTL clients put around labels.
+    private const string Gap = @"[\s\u200E\u200F\u202A-\u202E]*";
+    private const string Colon = "[:：]";
+
+    // Outlook "From:" / "Sent:" header labels in the client UI languages seen in D365 orgs.
+    private const string FromLabels =
+        @"From|De|De la|Von|Van|Da|Od|Från|Fra|Lähettäjä|Kimden|Feladó|От|Від|Από|מאת|من|差出人|发件人|寄件者|보낸\s*사람";
+    private const string SentLabels =
+        @"Sent|Enviado|Enviado el|Enviada|Enviada em|Gesendet|Verzonden|Inviato|Envoyé|Wysłane|Wysłano|" +
+        @"Odesláno|Skickat|Sendt|Lähetetty|Gönderildi|Gönderilme Tarihi|Elküldve|Trimis|Отправлено|" +
+        @"Надіслано|Στάλθηκε|נשלח|تم الإرسال|أرسل|送信日時|发送时间|寄件日期|보낸\s*날짜";
+
+    // Header block that opens a quoted message (From: ... Sent: ...), multi-language. The Sent
+    // label must not be the tail of a longer word ("Consent:", "Absent:").
     private static readonly Regex QuotedHeaderRegex = new Regex(
-        @"^\s*(From|De|Von|Van|Da|От)\s*:.*?" +
-        @"(Sent|Enviado|Gesendet|Verzonden|Inviato|Envoyé|Enviada|Отправлено)\s*:",
+        "^" + Gap + "(" + FromLabels + ")" + Gap + Colon + ".*?" +
+        @"(?<![\p{L}\p{M}])(" + SentLabels + ")" + Gap + Colon,
         RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
-    // Plain-text separators that introduce the previous message.
+    // Plain-text separators that always introduce the previous message.
     private static readonly Regex TextSeparatorRegex = new Regex(
         @"(-{2,}\s*Original Message\s*-{2,})" +      // -----Original Message-----
         @"|(-{2,}\s*Forwarded message\s*-{2,})" +    // ---------- Forwarded message ----------
-        @"|(_{5,})",                                 // ____________________ underscore rule
+        @"|(-{2,}\s*הודעה מקורית\s*-{2,})",          // -----הודעה מקורית----- (Hebrew Outlook)
         RegexOptions.IgnoreCase);
+
+    // A rule typed as text (_____ / ----- / =====). Senders also use these to separate sections
+    // of ONE message, so it is a boundary only when a From:/Sent: header follows it.
+    private static readonly Regex RuleLineRegex = new Regex(
+        @"_{5,}|-{5,}|={5,}|\*{5,}|~{5,}|[\u2013\u2014\u2500]{5,}");
+
+    // Attribution line that introduces a quoted <blockquote> ("On Mon, ... Bob wrote:").
+    private static readonly Regex AttributionRegex = new Regex(
+        @"(wrote|writes|schrieb|a écrit|escribió|escreveu|scrisse|ha scritto|schreef|napisał|napisała|" +
+        @"napsal|skrev|kirjoitti|yazdı|írta|написал|написала|написав|כתב|כתבה|כתב/ה|كتب|写道|寫道)" +
+        Gap + Colon + Gap + "$",
+        RegexOptions.IgnoreCase);
+
+    private static readonly HashSet<string> InlineTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { "a", "b", "strong", "i", "em", "u", "span", "font", "small", "big", "sub", "sup" };
 
     /// <summary>Returns the HTML of only the newest message in the thread.</summary>
     public static string ExtractLatestMessageHtml(string html)
@@ -268,55 +298,117 @@ public static class EmailThreadParser
 
         if (id == "divRplyFwdMsg" || id.Contains("divRplyFwdMsg")) return true;
         if (cls.Contains("gmail_quote") || cls.Contains("OutlookMessageHeader")) return true;
-        if (node.Name.Equals("blockquote", StringComparison.OrdinalIgnoreCase)) return true;
+        if (node.Name.Equals("blockquote", StringComparison.OrdinalIgnoreCase))
+            return IsQuotedBlockquote(node);
 
         // A bare <hr> is a boundary ONLY when a From:/Sent: header follows shortly after.
         // This is the classic D365 web-editor reply divider.
         if (node.Name.Equals("hr", StringComparison.OrdinalIgnoreCase))
-        {
-            var following = node.SelectNodes("following::*[position()<=8]");
-            if (following == null) return false;
-            var text = HtmlEntity.DeEntitize(string.Concat(following.Select(n => n.InnerText)));
-            return QuotedHeaderRegex.IsMatch(text.TrimStart());
-        }
+            return QuotedHeaderRegex.IsMatch(FollowingText(node));
         return false;
+    }
+
+    // The next few non-empty text nodes after a node, one per line (so "Bob" + "Sent:" from
+    // "Bob<br><b>Sent:</b>" stay separate words).
+    private static string FollowingText(HtmlNode node, string prefix = "")
+    {
+        var following = node.SelectNodes("following::text()[normalize-space()][position()<=12]");
+        var parts = following == null ? Enumerable.Empty<string>() : following.Select(n => n.InnerText);
+        return HtmlEntity.DeEntitize(prefix + "\n" + string.Join("\n", parts));
+    }
+
+    // Outlook on the web / new Outlook and Gmail emit <blockquote> for the "Increase indent"
+    // button too, so a blockquote is a boundary only when it carries quote evidence.
+    private static bool IsQuotedBlockquote(HtmlNode node)
+    {
+        if (node.GetAttributeValue("type", "").Equals("cite", StringComparison.OrdinalIgnoreCase) ||
+            node.Attributes["cite"] != null)
+            return true;                                             // Apple Mail / Thunderbird
+
+        var marker = node.GetAttributeValue("class", "") + " " + node.GetAttributeValue("id", "");
+        if (Regex.IsMatch(marker, "quote|cite|attribution", RegexOptions.IgnoreCase))
+            return true;
+
+        if (QuotedHeaderRegex.IsMatch(HtmlEntity.DeEntitize(node.InnerText)))
+            return true;                                             // starts with From:/Sent:
+
+        // "... wrote:" attribution just before the blockquote, or as its first line.
+        var previous = node.SelectSingleNode("preceding::text()[normalize-space()][1]");
+        var first = node.SelectSingleNode(".//text()[normalize-space()]");
+        return (previous != null && IsAttribution(LineText(previous, node))) ||
+               (first != null && IsAttribution(LineText(first, null)));
+    }
+
+    // An attribution ends with a colon and either names the "wrote" verb or carries an address
+    // ("... <bob@x.com> כתב/ה:"), which an ordinary sentence before an indented list does not.
+    private static bool IsAttribution(string text)
+    {
+        var t = HtmlEntity.DeEntitize(text).Trim().Trim('\u200E', '\u200F', '\u202A', '\u202B', '\u202C', '\u202D', '\u202E').Trim();
+        if (!(t.EndsWith(":") || t.EndsWith("：")))
+            return false;
+        return AttributionRegex.IsMatch(t) || t.Contains("@");
+    }
+
+    // Text of the line (closest non-inline element) holding a text node; falls back to the text
+    // node itself when that element also contains the blockquote being evaluated.
+    private static string LineText(HtmlNode textNode, HtmlNode? blockquote)
+    {
+        var line = textNode.ParentNode;
+        while (line != null && InlineTags.Contains(line.Name))
+            line = line.ParentNode;
+        if (line == null || (blockquote != null && blockquote.Ancestors().Contains(line)))
+            return textNode.InnerText;
+        return line.InnerText;
     }
 
     private static HtmlNode? FindTextBoundary(HtmlNode root)
     {
-        // 1) explicit text separators ("-----Original Message-----", underscore rule)
+        // 1) explicit text separators ("-----Original Message-----", "Forwarded message")
         // 2) a From:/Sent: header block sitting in its own element
+        // 3) a typed rule line (_____ / -----) immediately followed by a From:/Sent: header
         var textNodes = root.SelectNodes(".//text()[normalize-space()]");
         if (textNodes == null) return null;
 
         foreach (var tn in textNodes)
         {
             var t = HtmlEntity.DeEntitize(tn.InnerText);
-            if (TextSeparatorRegex.IsMatch(t) || QuotedHeaderRegex.IsMatch(t.TrimStart()))
-            {
-                // climb to the closest block-level ancestor so we cut the whole header block
-                var block = ClosestBlock(tn);
-                return block ?? tn;
-            }
+            if (TextSeparatorRegex.IsMatch(t) || QuotedHeaderRegex.IsMatch(t.TrimStart()) ||
+                IsRuleBeforeQuotedHeader(tn, t))
+                return CutPointFor(tn);
         }
         return null;
     }
 
-    private static HtmlNode? ClosestBlock(HtmlNode node)
+    private static bool IsRuleBeforeQuotedHeader(HtmlNode textNode, string text)
     {
-        string[] blocks = { "p", "div", "table", "blockquote", "td", "li", "span" };
-        var current = node.ParentNode;
-        HtmlNode? best = null;
-        while (current != null && !current.Name.Equals("body", StringComparison.OrdinalIgnoreCase))
-        {
-            if (blocks.Contains(current.Name, StringComparer.OrdinalIgnoreCase))
-                best = current;
-            current = current.ParentNode;
-        }
-        return best;
+        var rule = RuleLineRegex.Match(text);
+        if (!rule.Success) return false;
+
+        return QuotedHeaderRegex.IsMatch(FollowingText(textNode, text.Substring(rule.Index + rule.Length)));
     }
 
-    /// <summary>Removes the boundary node plus every sibling after it, at each ancestor level.</summary>
+    // Climbs from the matched text to the largest ancestor that STARTS with it, so the whole
+    // header block is cut but never a wrapper (e.g. Outlook's <div class="WordSection1">)
+    // that also holds the newest message above the separator.
+    private static HtmlNode CutPointFor(HtmlNode textNode)
+    {
+        var cut = textNode;
+        var parent = textNode.ParentNode;
+        while (parent != null &&
+               !parent.Name.Equals("body", StringComparison.OrdinalIgnoreCase) &&
+               parent != parent.OwnerDocument.DocumentNode &&
+               parent.SelectSingleNode("(.//text()[normalize-space()] | .//img)[1]") == textNode)
+        {
+            cut = parent;
+            parent = parent.ParentNode;
+        }
+        return cut;
+    }
+
+    /// <summary>
+    /// Removes the boundary node plus every sibling after it, at each ancestor level. The
+    /// ancestors themselves are kept because they also contain the newest message.
+    /// </summary>
     private static void RemoveNodeAndEverythingAfter(HtmlNode boundary)
     {
         var current = boundary;
@@ -330,7 +422,8 @@ public static class EmailThreadParser
                 sibling.Remove();
                 sibling = next;
             }
-            current.Remove();
+            if (current == boundary)
+                current.Remove();
 
             if (parent.Name.Equals("body", StringComparison.OrdinalIgnoreCase) ||
                 parent == parent.OwnerDocument.DocumentNode)

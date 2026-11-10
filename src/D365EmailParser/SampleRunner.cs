@@ -9,7 +9,7 @@ using System.Text;
 ///   dotnet run -- sample ..\..\samples\outlook-thread.html
 ///   dotnet run -- sample ..\..\samples\gmail-thread.html
 ///
-/// (Run without arguments to execute the synthetic unit tests in Program.cs instead.)
+/// (Run without arguments to execute the regression corpus in EmailTestCorpus*.cs instead.)
 /// </summary>
 internal static class SampleRunner
 {

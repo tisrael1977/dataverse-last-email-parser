@@ -40,10 +40,11 @@ Quoted-history boundaries handled (structural first, then text fallbacks):
 | Outlook / Exchange server-side sync | `<div id="divRplyFwdMsg">`, `From:/Sent:/To:/Subject:` header block |
 | D365 web email editor (CKEditor) | `<hr>` divider followed by a `<b>From:</b> …` header |
 | Gmail | `<div class="gmail_quote">` / `<blockquote class="gmail_quote">` |
-| Generic | `<blockquote>`, `-----Original Message-----`, `---------- Forwarded message ----------`, long underscore rules |
-| Multi-language headers | From/Sent in EN, ES, DE, NL, IT, FR, PT, RU |
+| Generic | Quoted `<blockquote>` (`type="cite"`, quote class, or preceded by a `… wrote:` attribution), `-----Original Message-----`, `---------- Forwarded message ----------`, `_____` / `-----` rules **followed by a `From:`/`Sent:` header** |
+| Multi-language headers | From/Sent in EN, HE (`מאת:` / `נשלח:`), AR, ES, DE, NL, IT, FR, PT, RU, UK, PL, CS, SV, DA/NO, FI, TR, HU, RO, EL, JA, ZH, KO |
 
-A single message with no history is returned untouched.
+A single message with no history is returned untouched — including one whose sections are
+separated by typed rule lines (`-----` / `_____`) or indented with the editor's indent button.
 
 ---
 
@@ -79,7 +80,9 @@ dataverse-last-email-parser/
 ├── .vscode/                      # F5 debug config for the test tool (launch.json + tasks.json)
 ├── docs/
 │   ├── CUSTOM_ACTION.md          # What the Custom API does + the downstream OCR flow
-│   └── INSTALLATION.md           # Install guide (solution import OR manual build/register)
+│   ├── INSTALLATION.md           # Install guide (solution import OR manual build/register)
+│   ├── HIDDEN-CONTENT-CLEANUP.md # Fix for hidden preheaders / Proofpoint banners in output
+│   └── PARSER_FIX_SEPARATOR_LINES.md  # Fix for single emails cut at _____ / indent lines
 ├── samples/
 │   ├── outlook-thread.html       # Sanitized Outlook (divRplyFwdMsg) fixture
 │   └── gmail-thread.html         # Sanitized Gmail (gmail_quote) fixture
@@ -95,7 +98,8 @@ dataverse-last-email-parser/
 └── src/
     ├── D365EmailParser/          # Parser library + console tests (net10.0)
     │   ├── EmailThreadParser.cs   # ← the reusable parser (shared with the plugin)
-    │   ├── Program.cs             # 6 synthetic unit tests
+    │   ├── Program.cs             # runs the corpus + hidden-content/attachment scenarios
+    │   ├── EmailTestCorpus*.cs    # 100+ single-message & thread cases (clients/languages)
     │   └── SampleRunner.cs        # generic "run on a file" demo
     └── D365EmailParser.Plugins/  # Dataverse Custom API plugin (net462)
         ├── GetLatestEmailWithPlaceholders.cs
@@ -114,7 +118,9 @@ Requires the .NET SDK.
 ```bash
 cd src/D365EmailParser
 
-# Run the synthetic unit tests (6 formats):
+# Run the regression corpus (single messages that must stay intact + threads from
+# Outlook/Gmail/Apple/Thunderbird/D365/... in many languages). Exit code 1 on any FAIL;
+# GAP lines are formats not handled yet (EmailCase.KnownGap):
 dotnet run
 
 # Run against a sample email file (prints all four outputs):
